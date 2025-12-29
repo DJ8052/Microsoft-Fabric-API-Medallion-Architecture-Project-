@@ -75,7 +75,7 @@ from pyspark.sql.functions import col, isnull, when
 from pyspark.sql.types import TimestampType
 from datetime import date, timedelta
 
-# Remove this before running Data Factory Pipeline
+#Data Factory Pipeline(Manual Run Fallback)
 start_date = date. today() - timedelta(7)
 
 # Load the JSON data into a Spark DataFrame
@@ -127,7 +127,7 @@ from pyspark.sql.types import StringType
 import reverse_geocoder as rg
 from datetime import date, timedelta
 
-# Remove this before running Data Factory Pipeline
+#Data Factory Pipeline(Manual Run Fallback)
 start_date = date. today() - timedelta(7)
 
 df = spark.read.table("earthquake_events_silver").filter(col('time') > start_date)
