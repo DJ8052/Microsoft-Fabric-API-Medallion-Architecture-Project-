@@ -1,0 +1,20 @@
+fabric-earthquake-medallion/
+│
+├── README.md
+│
+├── architecture/
+│   ├── medallion-architecture.md
+│   └── pipeline-flow.md
+│
+├── notebooks/
+│   ├── bronze_usgs_ingestion.md
+│   ├── silver_earthquake_transform.md
+│   └── gold_earthquake_enrichment.md
+│
+├── data-factory/
+│   └── earthquake_pipeline.md
+│
+├── powerbi/
+│   └── report_overview.md
+│
+└── decisions-and-workarounds.md
