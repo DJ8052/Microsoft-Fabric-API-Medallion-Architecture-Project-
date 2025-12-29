@@ -1,0 +1,290 @@
+# Medallion Architecture With Apache Spark Code
+**Project:** Earthquake Analytics in Microsoft Fabric (Bronze → Silver → Gold)  
+**Workspace:** `Earthquake_API_Visualization`  
+**Lakehouse:** `Earthquake_Lakehouse`  
+**Pipeline:** `Earthquake_Pipeline`  
+**Data Source:** USGS Earthquake API (GeoJSON)
+
+---
+
+## 1) Overview
+This project demonstrates an end-to-end Microsoft Fabric implementation of **Medallion Architecture** using **Apache Spark (Fabric Notebooks)**:
+
+- **Bronze:** Ingest raw API data and land it as raw JSON in Lakehouse Files
+- **Silver:** Flatten and structure JSON into a typed Delta table
+- **Gold:** Apply business-ready logic for reporting (classification + curated dataset)
+- **Orchestration:** Fabric Data Factory pipeline runs Bronze → Silver → Gold on a schedule
+- **Reporting:** Power BI report built from a semantic model over the Gold table  
+  - Map visuals required tenant setting enablement
+  - Reverse geocoding libraries were not available in this Fabric environment, so the report uses latitude/longitude and DAX for presentation fixes where needed
+
+---
+
+## 2) Fabric Setup Steps
+1. Create a Fabric workspace named: `Earthquake_API_Visualization`
+2. Create a Lakehouse named: `Earthquake_Lakehouse`
+3. Create three notebooks:
+   - `Bronze_Layer`
+   - `Silver_Layer`
+   - `Gold_Layer`
+4. Attach each notebook to the same Lakehouse: `Earthquake_Lakehouse`
+
+---
+
+## 3) Bronze Layer — API Ingestion (Raw JSON)
+**Goal:** Pull earthquake data from USGS and save raw JSON to Lakehouse Files.
+
+### Bronze Notebook Code (`Bronze_Layer`)
+
+#### A) Imports
+```python
+import requests
+import json
+from datetime import date, timedelta
+----------------------------------------------------------------------------------------------------------
+(Parameter-ready dates)
+
+
+try:
+    start_date
+except NameError:
+    start_date = (date.today() - timedelta(7)).isoformat()
+
+try:
+    end_date
+except NameError:
+    end_date = (date.today() - timedelta(1)).isoformat()
+
+print("Bronze start_date:", start_date)
+print("Bronze end_date:", end_date)
+---------------------------------------------------------------------------------------------------------
+(Build URL and API)
+
+url = f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime={start_date}&endtime={end_date}"
+print("USGS URL:", url)
+
+response = requests.get(url)
+response.raise_for_status()
+
+features = response.json().get("features", [])
+print("Features returned:", len(features))
+----------------------------------------------------------------------------------------------------------------
+(Save Raw JSON to Lakehouse)
+
+file_path = f"/lakehouse/default/Files/{start_date}_earthquake_data.json"
+
+with open(file_path, "w") as f:
+    json.dump(features, f, indent=4)
+
+print(f"Saved Bronze JSON to: {file_path}")
+----------------------------------------------------------------------------------------------------------------
+##### Silver Notebook Code (`Silver_Layer`)
+from pyspark.sql.functions import col, isnull, when
+from pyspark.sql.types import TimestampType
+from datetime import date, timedelta
+--------------------------------------------------------------------------------------------------------------
+(Parameter ready start_date)
+
+try:
+    start_date
+except NameError:
+    start_date = (date.today() - timedelta(7)).isoformat()
+
+print("Silver start_date:", start_date)
+----------------------------------------------------------------------------------------------------------------
+(Load Bronze JSON)
+
+df = spark.read.option("multiline", "true").json(f"Files/{start_date}_earthquake_data.json")
+df.printSchema()
+----------------------------------------------------------------------------------------------------------------
+(Reshape /Flatten)
+df = (
+    df.select(
+        "id",
+        col("geometry.coordinates").getItem(0).alias("longitude"),
+        col("geometry.coordinates").getItem(1).alias("latitude"),
+        col("geometry.coordinates").getItem(2).alias("elevation"),
+        col("properties.title").alias("title"),
+        col("properties.place").alias("place_description"),
+        col("properties.sig").alias("sig"),
+        col("properties.mag").alias("mag"),
+        col("properties.magType").alias("magType"),
+        col("properties.time").alias("time"),
+        col("properties.updated").alias("updated")
+    )
+)
+--------------------------------------------------------------------------------------------------------------------
+(Validation/Null Handling)
+
+df = (
+    df.withColumn("longitude", when(isnull(col("longitude")), 0).otherwise(col("longitude")))
+      .withColumn("latitude", when(isnull(col("latitude")), 0).otherwise(col("latitude")))
+      .withColumn("time", when(isnull(col("time")), 0).otherwise(col("time")))
+)
+-------------------------------------------------------------------------------------------------------------------
+(Convert Epoch Milliseconds to Time Stamps)
+
+df = (
+    df.withColumn("time", (col("time") / 1000).cast(TimestampType()))
+      .withColumn("updated", (col("updated") / 1000).cast(TimestampType()))
+)
+---------------------------------------------------------------------------------------------------------------------
+(Write Silver Table)
+
+df.write.mode("append").saveAsTable("earthquake_events_silver")
+print("Appended to earthquake_events_silver")
+----------------------------------------------------------------------------------------------------------------------
+Gold Notebook Code (`Gold_Layer`)
+(Imports)
+from pyspark.sql.functions import when, col
+from datetime import date, timedelta
+----------------------------------------------------------------------------------------------------------------------
+(Parameter Ready start_date)
+try:
+    start_date
+except NameError:
+    start_date = (date.today() - timedelta(7)).isoformat()
+
+print("Gold start_date:", start_date)
+-----------------------------------------------------------------------------------------------------------------------
+(Load Silver and Filtering Window)
+df = spark.read.table("earthquake_events_silver").filter(col("time") > start_date)
+------------------------------------------------------------------------------------------------------------------------
+(Add Sigmificance Classification)
+df_gold = (
+    df.withColumn(
+        "sig_class",
+        when(col("sig") < 100, "Low")
+        .when((col("sig") >= 100) & (col("sig") < 500), "Moderate")
+        .otherwise("High")
+    )
+)
+-------------------------------------------------------------------------------------------------------------------------
+(Write To Gold Table)
+df_gold.write.mode("append").saveAsTable("earthquake_events_gold")
+print("Appended to earthquake_events_gold")
+------------------------------------------------------------------------------------------------------------------------
+
+Reverse Geocoding Workaround (Environment Constraint)
+
+Attempted enhancement: enrich earthquakes with country/state using reverse_geocoder.
+
+What happened:
+
+Fabric Environment did not allow the external package install in this tenant/capacity
+
+Result: ModuleNotFoundError: No module named 'reverse_geocoder'
+
+Workaround:
+
+Use latitude/longitude directly in Power BI Map visual
+
+Use DAX to fill missing location labels when needed
+
+This is a realistic platform constraint and is documented as a design decision.
+
+7) Fabric Data Factory Pipeline — Orchestration
+
+Goal: Automate Bronze → Silver → Gold via a parameterized pipeline.
+
+Pipeline Steps
+
+Create a new pipeline named: Earthquake_Pipeline
+
+Add pipeline parameters:
+
+p_start_date (String)
+
+p_end_date (String)
+
+Suggested defaults (testing):
+
+p_start_date:
+
+@formatDateTime(addDays(utcNow(), -7), 'yyyy-MM-dd')
+
+p_end_date:
+
+@formatDateTime(addDays(utcNow(), -1), 'yyyy-MM-dd')
+
+Add 3 Notebook activities in order:
+
+Activity 1: Bronze
+
+Activity name: Bronze_Notebook
+
+Notebook: Bronze_Layer
+
+Parameters:
+
+start_date = @pipeline().parameters.p_start_date
+
+end_date = @pipeline().parameters.p_end_date
+
+Activity 2: Silver (depends on Bronze success)
+
+Activity name: Silver_Notebook
+
+Notebook: Silver_Layer
+
+Parameters:
+
+start_date = @pipeline().parameters.p_start_date
+
+Activity 3: Gold (depends on Silver success)
+
+Activity name: Gold_Notebook
+
+Notebook: Gold_Layer
+
+Parameters:
+
+start_date = @pipeline().parameters.p_start_date
+
+end_date = @pipeline().parameters.p_end_date (optional unless used)
+
+Save and run once manually to validate
+
+Add a daily schedule trigger (optional)
+
+Trigger does not add incremental cost beyond capacity usage
+
+Use your local time zone
+
+Common Issue Encountered:
+
+Error: Parameter p_start_date was not found under Earthquake_Pipeline
+
+Fix: ensure p_start_date exists at the pipeline level (not just in activity mappings) and Save/Publish.
+
+8) Power BI Reporting Steps (Semantic Model → Report)
+
+In Lakehouse, switch to SQL analytics endpoint
+
+Create a new semantic model
+
+select earthquake_events_gold
+
+name semantic model: Earthquake_Report
+
+Switch to Power BI experience
+
+Create New report using the semantic model
+
+Map visual:
+
+tenant setting needed: enable Map and Filled Map visuals
+
+use Latitude and Longitude fields for accurate plotting
+
+DAX used as needed to fill missing location labels (presentation-layer fix)
+
+9) What’s Delivered
+
+Automated pipeline (Bronze → Silver → Gold)
+
+Curated Gold table for reporting
+
+Power BI report built on Gold semantic model
+
+Documented decisions and real-world constraints (reverse geocoding + map settings)
