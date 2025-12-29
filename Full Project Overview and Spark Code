@@ -36,7 +36,8 @@ This project demonstrates an end-to-end Microsoft Fabric implementation of **Med
 Bronze Layer — API Ingestion (Raw JSON)
 **Goal:** Pull earthquake data from USGS and save raw JSON to Lakehouse Files.
 
-### Bronze Notebook Code (`Bronze_Layer`)
+###Bronze Notebook Code (`Bronze_Layer`)
+
 import requests
 import json
 from datetime import date, timedelta
@@ -69,7 +70,7 @@ try:
 except requests.exceptions.RequestException as e:
     print(f"Error fetching data from API: {e}")
 ----------------------------------------------------------------------------------------------------------------
-##### Silver Notebook Code (`Silver_Layer`)
+##Silver Notebook Code (`Silver_Layer`)
 from pyspark.sql.functions import col, isnull, when
 from pyspark.sql.types import TimestampType
 from datetime import date, timedelta
@@ -118,7 +119,8 @@ df.write.mode('append').saveAsTable('earthquake_events_silver')
 
 
 ----------------------------------------------------------------------------------------------------------------------
-Gold Notebook Code (`Gold_Layer`)
+##Gold Notebook Code (`Gold_Layer`)
+
 from pyspark.sql.functions import when, col, udf
 from pyspark.sql.types import StringType
 # Ensure the below library is installed on your fabric environment
@@ -192,6 +194,7 @@ Use latitude/longitude directly in Power BI Map visual
 Use DAX to fill missing location labels when needed
 
 This is a realistic platform constraint and is documented as a design decision.
+---------------------------------------------------------------------------------------------------------------------------
 
 5) Fabric Data Factory Pipeline — Orchestration
 
@@ -266,20 +269,21 @@ Common Issue Encountered:
 Error: Parameter p_start_date was not found under Earthquake_Pipeline
 
 Fix: ensure p_start_date exists at the pipeline level (not just in activity mappings) and Save/Publish.
+-----------------------------------------------------------------------------------------------------------
 
 6) Power BI Reporting Steps (Semantic Model → Report)
 
 In Lakehouse, switch to SQL analytics endpoint
 
-Create a new semantic model
+(Create a new semantic mode)l
 
 select earthquake_events_gold
 
-Name semantic model: Earthquake_Report
+(Name semantic model: Earthquake_Report)
 
 Switch to Power BI experience
 
-Create New report using the semantic model
+(Create New report using the semantic model)
 
 Map visual:
 
@@ -288,8 +292,9 @@ tenant setting needed: enable Map and Filled Map visuals
 use Latitude and Longitude fields for accurate plotting
 
 DAX used as needed to fill missing location labels (presentation-layer fix)
+------------------------------------------------------------------------------------------------------------
 
-9) What’s Delivered
+7) Conclusion: What’s Delivered
 
 Automated pipeline (Bronze → Silver → Gold)
 
